@@ -1,56 +1,55 @@
-language: go
-go:
-  - 1.8
-go_import_path: github.com/improbable-eng/grpc-web
-addons:
-  hosts:
-    # These must match the hosts defined in test/hosts-config.ts
-    - testhost
-    - corshost
+## Copyright 2018 Yannic Bonenberger. All rights reserved.
+##
+## Licensed under the Apache License, Version 2.0 (the "License");
+## you may not use this file except in compliance with the License.
+## You may obtain a copy of the License at
+##
+##    http://www.apache.org/licenses/LICENSE-2.0
+##
+## Unless required by applicable law or agreed to in writing, software
+## distributed under the License is distributed on an "AS IS" BASIS,
+## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+## See the License for the specific language governing permissions and
+## limitations under the License.
+
+dist: trusty
+sudo: required
+osx_image: xcode8.3
+language: java
+
+os:
+  - linux
+  - osx
+
 env:
-  global:
-    - PROTOBUF_VER="3.5.0"
-    # GLOBAL_TESTSERVER is used to skip starting the testserver in run-with-testserver.sh
-    - GLOBAL_TESTSERVER=true
-    - SEPARATE_TEST_SUITES=true
-  matrix:
-    # Browsers that do not support trusting self-signed certs for wss:// connections are disabled (see https://github.com/improbable-eng/grpc-web/issues/165)
-    - BROWSER=nodejs
-    - BROWSER=edge14_win
-    - BROWSER=edge13_win
-    - BROWSER=ie11_win DISABLE_WEBSOCKET_TESTS=true
-    - BROWSER=firefox53_osx
-    - BROWSER=firefox39_osx
-    - BROWSER=firefox38_osx
-    - BROWSER=firefox21_osx
-    - BROWSER=chrome_57
-    - BROWSER=chrome_52
-    - BROWSER=chrome_43
-    - BROWSER=chrome_42
-    - BROWSER=chrome_41
-    - BROWSER=safari11 DISABLE_WEBSOCKET_TESTS=true
-    - BROWSER=safari9_1 DISABLE_WEBSOCKET_TESTS=true
-    - BROWSER=safari8 DISABLE_WEBSOCKET_TESTS=true
-    - BROWSER=safari6 DISABLE_WEBSOCKET_TESTS=true
-cache:
-  directories:
-    - node_modules
+  # TODO(yannic): Test without bazel.
+  - V=0.16.0
+
 before_install:
-  - sudo apt-get install unzip
-  - bash install-protobuf.sh
-  - true && `base64 --decode <<< ZXhwb3J0IEJST1dTRVJfU1RBQ0tfVVNFUk5BTUU9aW1wcm9iYWJsZWVuZ2JvdDEK`
-  - true && `base64 --decode <<< ZXhwb3J0IEJST1dTRVJfU1RBQ0tfQUNDRVNTX0tFWT1SRG1Cc2pwQUJ4RlljcEVkeVp5bwo=`
-install:
-  - go get -u github.com/golang/dep/cmd/dep
-  - go get -u golang.org/x/tools/cmd/goimports
-  - go get -u github.com/robertkrimen/godocdown/godocdown
-  - go get -u github.com/golang/protobuf/protoc-gen-go
-  - dep ensure
-  - export PATH=/home/travis/gopath/src/github.com/improbable-eng/grpc-web/protobuf/bin:$PATH
-  - nvm install
-  - npm install
-before_script:
-  - ./test/start-testserver.sh &
+  - |
+    if [[ "${TRAVIS_OS_NAME}" == "osx" ]]; then
+      OS=darwin
+    else
+      sysctl kernel.unprivileged_userns_clone=1
+      OS=linux
+    fi
+    URL="https://github.com/bazelbuild/bazel/releases/download/${V}/bazel-${V}-installer-${OS}-x86_64.sh"
+    wget -O install.sh "${URL}"
+    chmod +x install.sh
+    ./install.sh --user
+    rm -f install.sh
+
 script:
-  - ./lint-all.sh
-  - travis_retry npm run test
+  - |
+    bazel \
+      --output_base=$HOME/.cache/bazel \
+      --host_jvm_args=-Xmx500m \
+      --host_jvm_args=-Xms500m \
+      test \
+      --experimental_repository_cache="$HOME/.cache/bazel_repository_cache" \
+      --local_resources=400,1,1.0 \
+      //... \
+      @com_github_yannic_grpcweb//...
+
+notifications:
+  email: false

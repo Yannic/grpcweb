@@ -1,185 +1,211 @@
-# gRPC-Web: Typed Frontend Development
+# grpcweb
+--
+    import "github.com/improbable-eng/grpc-web/go/grpcweb"
 
+`grpcweb` implements the gRPC-Web spec as a wrapper around a gRPC-Go Server.
 
-[![Master Build](https://travis-ci.org/improbable-eng/grpc-web.svg)](https://travis-ci.org/improbable-eng/grpc-web)
-![BrowserStack Status](https://www.browserstack.com/automate/badge.svg?badge_key=L0k3QjhiNnByd3hWVVhtS0FxTmNrZERwbDBqR053OFJKV01veUpkL1FqOD0tLXZyS0d2WC9TaGEzeTBjbXZ6L1JNa2c9PQ==--b460187586f63fc2a48f557a515f9900f5639d10)
-[![NPM](https://img.shields.io/npm/v/grpc-web-client.svg)](https://www.npmjs.com/package/grpc-web-client)
-[![GoDoc](http://img.shields.io/badge/GoDoc-Reference-blue.svg)](https://godoc.org/github.com/improbable-eng/grpc-web/go/grpcweb) 
-[![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![quality: alpha](https://img.shields.io/badge/quality-alpha-orange.svg)](#status)
-[![Slack](slack.png)](https://join.slack.com/t/improbable-eng/shared_invite/enQtMzQ1ODcyMzQ5MjM4LWY5ZWZmNGM2ODc5MmViNmQ3ZTA3ZTY3NzQwOTBlMTkzZmIxZTIxODk0OWU3YjZhNWVlNDU3MDlkZGViZjhkMjc)
+It allows web clients (see companion JS library) to talk to gRPC-Go servers over
+the gRPC-Web spec. It supports HTTP/1.1 and HTTP2 encoding of a gRPC stream and
+supports unary and server-side streaming RPCs. Bi-di and client streams are
+unsupported due to limitations in browser protocol support.
 
-[gRPC](http://www.grpc.io/) is a modern, [HTTP2](https://hpbn.co/http2/)-based protocol, that provides RPC semantics using the strongly-typed *binary* data format of [protocol buffers](https://developers.google.com/protocol-buffers/docs/overview) across multiple languages (C++, C#, Golang, Java, Python, NodeJS, ObjectiveC, etc.)
+See https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md for the
+protocol specification.
 
-[gRPC-Web](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md) is a cutting-edge spec that enables invoking gRPC services from *modern* browsers.
+Here's an example of how to use it inside an existing gRPC Go server on a
+separate http.Server that serves over TLS:
 
-*__If you are looking for gRPC support for Node.js there is an [official Node.js gRPC library](https://www.npmjs.com/package/grpc). This package supports Node.js, but requires that the server has the gRPC-Web compatibility layer (read on to understand more).__*
+    grpcServer := grpc.Server()
+    wrappedGrpc := grpcweb.WrapServer(grpcServer)
+    tlsHttpServer.Handler = http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
+    	if wrappedGrpc.IsGrpcWebRequest(req) {
+    		wrappedGrpc.ServeHTTP(resp, req)
+    	}
+    	// Fall back to other servers.
+    	http.DefaultServeMux.ServeHTTP(resp, req)
+    })
 
-Components of the stack are based on Golang and TypeScript:
+If you'd like to have a standalone binary, please take a look at `grpcwebproxy`.
 
- * [`grpcweb`](go/grpcweb) - a Go package that wraps an existing `grpc.Server` as a gRPC-Web `http.Handler` for both HTTP2 and HTTP/1.1.
- * [`grpcwebproxy`](go/grpcwebproxy) - a Go-based stand-alone reverse proxy for classic gRPC servers (e.g. in Java or C++) that exposes their services over gRPC-Web to modern browsers.
- * [`ts-protoc-gen`](https://github.com/improbable-eng/ts-protoc-gen) - a TypeScript plugin for the protocol buffers compiler that provides strongly typed message classes and method definitions.
- * [`grpc-web-client`](ts) - a TypeScript gRPC-Web client library for browsers ([and Node.js](#nodejs-support)).
- 
-## Why?
+## Usage
 
-With gRPC-Web, it is extremely easy to build well-defined, easy to reason about APIs between browser frontend code and microservices. Frontend development changes significantly:
-
- * no more hunting down API documentation - `.proto` is the canonical format for API contracts.
- * no more hand-crafted JSON call objects - all requests and responses are strongly typed and code-generated, with hints available in the IDE.
- * no more dealing with methods, headers, body and low level networking - everything is handled by `grpc.invoke`.
- * no more second-guessing the meaning of error codes - [gRPC status codes](https://godoc.org/google.golang.org/grpc/codes) are a canonical way of representing issues in APIs.
- * no more one-off server-side request handlers to avoid concurrent connections - gRPC-Web is based on HTTP2, with multiplexes multiple streams over the [same connection](https://hpbn.co/http2/#streams-messages-and-frames).
- * no more problems streaming data from a server -  gRPC-Web supports both *1:1* RPCs and *1:many* streaming requests.
- * no more data parse errors when rolling out new binaries - [backwards and forwards-compatibility](https://developers.google.com/protocol-buffers/docs/gotutorial#extending-a-protocol-buffer) of requests and responses.
-
-In short, gRPC-Web moves the interaction between frontend code and microservices from the sphere of hand-crafted HTTP requests to well-defined user-logic methods.
-
-## Client-side (grpc-web-client) Docs
-
-**Note: You'll need to add gRPC-Web compatibility to your server through either [`grpcweb`](go/grpcweb) or [`grpcwebproxy`](go/grpcwebproxy).**
-
-[API Docs for `grpc-web-client` can be found here](ts)
-
-## Example 
-
-For a self-contained demo of a Golang gRPC service called from a TypeScript project, see [example](example). It contains most of the initialization code that performs the magic. Here's the application code extracted from the example:
-
-You use `.proto` files to define your service. In this example, one normal RPC (`GetBook`) and one server-streaming RPC (`QueryBooks`):
-
-```proto
-syntax = "proto3";
-
-message Book {
-  int64 isbn = 1;
-  string title = 2;
-  string author = 3;
-}
-
-message GetBookRequest {
-  int64 isbn = 1;
-}
-
-message QueryBooksRequest {
-  string author_prefix = 1;
-}
-
-service BookService {
-  rpc GetBook(GetBookRequest) returns (Book) {}
-  rpc QueryBooks(QueryBooksRequest) returns (stream Book) {}
-}
-```
-
-And implement it in Go (or any other gRPC-supported language):
+#### func  ListGRPCResources
 
 ```go
-import pb_library "../_proto/examplecom/library"
+func ListGRPCResources(server *grpc.Server) []string
+```
+ListGRPCResources is a helper function that lists all URLs that are registered
+on gRPC server.
 
-type bookService struct{
-        books []*pb_library.Book
-}
+This makes it easy to register all the relevant routes in your HTTP router of
+choice.
 
-func (s *bookService) GetBook(ctx context.Context, bookQuery *pb_library.GetBookRequest) (*pb_library.Book, error) {
-	for _, book := range s.books {
-		if book.Isbn == bookQuery.Isbn {
-			return book, nil
-		}
-	}
-	return nil, grpc.Errorf(codes.NotFound, "Book could not be found")
-}
+#### type Option
 
-func (s *bookService) QueryBooks(bookQuery *pb_library.QueryBooksRequest, stream pb_library.BookService_QueryBooksServer) error {
-	for _, book := range s.books {
-		if strings.HasPrefix(s.book.Author, bookQuery.AuthorPrefix) {
-			stream.Send(book)
-		}
-	}
-	return nil
+```go
+type Option func(*options)
+```
+
+
+#### func  WithAllowedRequestHeaders
+
+```go
+func WithAllowedRequestHeaders(headers []string) Option
+```
+WithAllowedRequestHeaders allows for customizing what gRPC request headers a
+browser can add.
+
+This is controlling the CORS pre-flight `Access-Control-Allow-Headers` method
+and applies to *all* gRPC handlers. However, a special `*` value can be passed
+in that allows the browser client to provide *any* header, by explicitly
+whitelisting all `Access-Control-Request-Headers` of the pre-flight request.
+
+The default behaviour is `[]string{'*'}`, allowing all browser client headers.
+This option overrides that default, while maintaining a whitelist for
+gRPC-internal headers.
+
+Unfortunately, since the CORS pre-flight happens independently from gRPC handler
+execution, it is impossible to automatically discover it from the gRPC handler
+itself.
+
+The relevant CORS pre-flight docs:
+https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Headers
+
+#### func  WithCorsForRegisteredEndpointsOnly
+
+```go
+func WithCorsForRegisteredEndpointsOnly(onlyRegistered bool) Option
+```
+WithCorsForRegisteredEndpointsOnly allows for customizing whether OPTIONS
+requests with the `X-GRPC-WEB` header will only be accepted if they match a
+registered gRPC endpoint.
+
+This should be set to false to allow handling gRPC requests for unknown
+endpoints (e.g. for proxying).
+
+The default behaviour is `true`, i.e. only allows CORS requests for registered
+endpoints.
+
+#### func  WithOriginFunc
+
+```go
+func WithOriginFunc(originFunc func(origin string) bool) Option
+```
+WithOriginFunc allows for customizing what CORS Origin requests are allowed.
+
+This is controlling the CORS pre-flight `Access-Control-Allow-Origin`. This
+mechanism allows you to limit the availability of the APIs based on the domain
+name of the calling website (Origin). You can provide a function that filters
+the allowed Origin values.
+
+The default behaviour is `*`, i.e. to allow all calling websites.
+
+The relevant CORS pre-flight docs:
+https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Origin
+
+#### func  WithWebsocketOriginFunc
+
+```go
+func WithWebsocketOriginFunc(websocketOriginFunc func(req *http.Request) bool) Option
+```
+WithWebsocketOriginFunc allows for customizing the acceptance of Websocket
+requests - usually to check that the origin is valid.
+
+The default behaviour is to check that the origin of the request matches the
+host of the request.
+
+#### func  WithWebsockets
+
+```go
+func WithWebsockets(enableWebsockets bool) Option
+```
+WithWebsockets allows for handling grpc-web requests of websockets - enabling
+bidirectional requests.
+
+The default behaviour is false, i.e. to disallow websockets
+
+#### type WrappedGrpcServer
+
+```go
+type WrappedGrpcServer struct {
 }
 ```
 
-You will be able to access it in a browser using TypeScript (and equally JavaScript after transpiling):
 
-```javascript
-import {grpc} from "grpc-web-client";
+#### func  WrapServer
 
-// Import code-generated data structures.
-import {BookService} from "../_proto/examplecom/library/book_service_pb_service";
-import {QueryBooksRequest, Book, GetBookRequest} from "../_proto/examplecom/library/book_service_pb";
-
-const queryBooksRequest = new QueryBooksRequest();
-queryBooksRequest.setAuthorPrefix("Geor");
-grpc.invoke(BookService.QueryBooks, {
-  request: queryBooksRequest,
-  host: "https://example.com",
-  onMessage: (message: Book) => {
-    console.log("got book: ", message.toObject());
-  },
-  onEnd: (code: grpc.Code, msg: string | undefined, trailers: grpc.Metadata) => {
-    if (code == grpc.Code.OK) {
-      console.log("all ok")
-    } else {
-      console.log("hit an error", code, msg, trailers);
-    }
-  }
-});
+```go
+func WrapServer(server *grpc.Server, options ...Option) *WrappedGrpcServer
 ```
+WrapServer takes a gRPC Server in Go and returns a WrappedGrpcServer that
+provides gRPC-Web Compatibility.
 
-### Usage with React
-* [Example project using gRPC-Web with React and Go](https://github.com/easyCZ/grpc-web-hacker-news)
+The internal implementation fakes out a http.Request that carries standard gRPC,
+and performs the remapping inside http.ResponseWriter, i.e. mostly the
+re-encoding of Trailers (that carry gRPC status).
 
-## Browser Support
+You can control the behaviour of the wrapper (e.g. modifying CORS behaviour)
+using `With*` options.
 
-The `grpc-web-client` uses multiple techniques to efficiently invoke gRPC services. Most modern browsers support the [Fetch API](https://developer.mozilla.org/en/docs/Web/API/Fetch_API), which allows for efficient reading of partial, binary responses. For older browsers, it automatically falls back to [`XMLHttpRequest`](https://developer.mozilla.org/nl/docs/Web/API/XMLHttpRequest).
+#### func (*WrappedGrpcServer) HandleGrpcWebRequest
 
-The gRPC semantics encourage you to make multiple requests at once. With most modern browsers [supporting HTTP2](http://caniuse.com/#feat=http2), these can be executed over a single TLS connection. For older browsers, gRPC-Web falls back to HTTP/1.1 chunk responses.
-
-This library is tested against:
-  * Chrome >= 41
-  * Firefox >= 21
-  * Edge >= 13
-  * IE >= 11
-  * Safari >= 6
-  
-## Node.js Support
-
-`grpc-web-client` also [supports Node.js through a transport](ts/docs/transport.md#node-http-only-available-in-a-nodejs-environment) that uses the `http` and `https` packages. Usage does not vary from browser usage as transport is determined at runtime.
-
-If you want to use `grpc-web-client` in a node.js environment with Typescript, you must include `dom` in the `"lib"` Array in your `tsconfig.json` otherwise `tsc` will be unable to find some type declarations to compile. Note that `dom` will be included automatically if you do not declare `lib` in your configration and your target is one of `es5` or `es6`. (See [Typescript compiler options](https://www.typescriptlang.org/docs/handbook/compiler-options.html)).
-
+```go
+func (w *WrappedGrpcServer) HandleGrpcWebRequest(resp http.ResponseWriter, req *http.Request)
 ```
-{
-  "compilerOptions": {
-    "lib": [ "dom", /* ... */ ],
-  }
-}
+HandleGrpcWebRequest takes a HTTP request that is assumed to be a gRPC-Web
+request and wraps it with a compatibility layer to transform it to a standard
+gRPC request for the wrapped gRPC server and transforms the response to comply
+with the gRPC-Web protocol.
+
+#### func (*WrappedGrpcServer) HandleGrpcWebsocketRequest
+
+```go
+func (w *WrappedGrpcServer) HandleGrpcWebsocketRequest(resp http.ResponseWriter, req *http.Request)
 ```
+HandleGrpcWebsocketRequest takes a HTTP request that is assumed to be a
+gRPC-Websocket request and wraps it with a compatibility layer to transform it
+to a standard gRPC request for the wrapped gRPC server and transforms the
+response to comply with the gRPC-Web protocol.
 
-*__Please note - There is an [official Node.js gRPC library](https://www.npmjs.com/package/grpc) that does not require the server to support gRPC-Web__*
+#### func (*WrappedGrpcServer) IsAcceptableGrpcCorsRequest
 
-### Client-side streaming
+```go
+func (w *WrappedGrpcServer) IsAcceptableGrpcCorsRequest(req *http.Request) bool
+```
+IsAcceptableGrpcCorsRequest determines if a request is a CORS pre-flight request
+for a gRPC-Web request and that this request is acceptable for CORS.
 
-It is very important to note that the gRPC-Web spec currently *does not support client-side streaming*. This is unlikely to change until new whatwg fetch/[streams API](https://www.w3.org/TR/streams-api/) lands in browsers. As such, if you plan on using gRPC-Web you're limited to:
- * unary RPCs (1 request 1 response)
- * server-side streaming RPCs (1 request N responses)
+You can control the CORS behaviour using `With*` options in the WrapServer
+function.
 
-This, however, is useful for a lot of frontend functionality.
+#### func (*WrappedGrpcServer) IsGrpcWebRequest
 
-## Status
+```go
+func (w *WrappedGrpcServer) IsGrpcWebRequest(req *http.Request) bool
+```
+IsGrpcWebRequest determines if a request is a gRPC-Web request by checking that
+the "content-type" is "application/grpc-web" and that the method is POST.
 
-The code here is `alpha` quality. It is being used for a subset of Improbable's frontend single-page apps in production.
+#### func (*WrappedGrpcServer) IsGrpcWebSocketRequest
 
-## Known Limitations
+```go
+func (w *WrappedGrpcServer) IsGrpcWebSocketRequest(req *http.Request) bool
+```
+IsGrpcWebSocketRequest determines if a request is a gRPC-Web request by checking
+that the "Sec-Websocket-Protocol" header value is "grpc-websockets"
 
-### Server-side streaming with XHR
+#### func (*WrappedGrpcServer) ServeHTTP
 
-Browsers that don't support [Fetch with `body.getReader`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream) (Currently only supported by Edge 14+, Chrome 43+ - full ReadableStream was added in Chrome 52, but only `body.getReader()` is used) or `XMLHttpRequest.responseType = moz-chunked-arraybuffer` (Firefox 38+) use [XmlHttpRequest (XHR)](https://developer.mozilla.org/en/docs/Web/API/XMLHttpRequest).
+```go
+func (w *WrappedGrpcServer) ServeHTTP(resp http.ResponseWriter, req *http.Request)
+```
+ServeHTTP takes a HTTP request and if it is a gRPC-Web request wraps it with a
+compatibility layer to transform it to a standard gRPC request for the wrapped
+gRPC server and transforms the response to comply with the gRPC-Web protocol.
 
-XHR keeps the entire server response in memory. This means that a long-lived or otherwise large streaming response will consume a large amount of memory in the browser and may cause instability. Fetch does not suffer from this issue. It is therefore advised that you don't use open-ended or large payload server streaming if you intend to support browsers that do not support Fetch.
+The gRPC-Web compatibility is only invoked if the request is a gRPC-Web request
+as determined by IsGrpcWebRequest or the request is a pre-flight (CORS) request
+as determined by IsAcceptableGrpcCorsRequest.
 
-You can read more about how grpc-web-client determines and uses transports [here](ts/docs/transport.md).
-
-### Running the tests
-
-[See test README](test)
+You can control the CORS behaviour using `With*` options in the WrapServer
+function.
